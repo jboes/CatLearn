@@ -1,7 +1,7 @@
 import numpy as np
 from ase.atoms import Atoms
 from catlearn.optimize.io import array_to_ase
-
+import importlib
 
 def get_energy_catlearn(self, x=None):
 
@@ -27,10 +27,17 @@ def get_energy_catlearn(self, x=None):
 
     # Get energies using ASE:
     pos_ase = array_to_ase(x, self.num_atoms)
+    
+    if not isinstance(self.ase_calc, dict):
+        self.ase_ini.set_calculator(None)
+        self.ase_ini = Atoms(self.ase_ini, positions=pos_ase,
+                             calculator=self.ase_calc)
+    else:
+        self.ase_ini = Atoms(self.ase_ini, positions=pos_ase)
+        calculator = getattr(importlib.import_module('decaf'), 
+                             'Espresso')
+        calculator(self.ase_ini, **self.ase_calc)
 
-    self.ase_ini.set_calculator(None)
-    self.ase_ini = Atoms(self.ase_ini, positions=pos_ase,
-                         calculator=self.ase_calc)
     energy = self.ase_ini.get_potential_energy()
     return energy
 
