@@ -20,7 +20,7 @@ from catlearn import __version__
 
 class MLNEB(object):
 
-    def __init__(self, start, end, prev_calculations=None,
+    def __init__(self, start=None, end=None, prev_calculations=None,
                  n_images=0.25, k=None, interpolation='idpp', mic=False,
                  neb_method='improvedtangent', ase_calc=None, restart=True):
 
@@ -72,7 +72,7 @@ class MLNEB(object):
             end = 'final.traj'
         if interpolation != 'idpp' and interpolation != 'linear':
             path = interpolation
-        if isinstance(path, list):
+        elif isinstance(path, list):
             write('initial_path.traj', path)
             path = 'initial_path.traj'
         if isinstance(prev_calculations, list):
@@ -106,8 +106,9 @@ class MLNEB(object):
         # Create new file to store warnings and errors.
         open('warnings_and_errors.txt', 'w')
 
-        assert start is not None, err_not_neb_start()
-        assert end is not None, err_not_neb_end()
+        if isinstance(path, str):
+            assert start is not None, err_not_neb_start()
+            assert end is not None, err_not_neb_end()
         assert self.ase_calc, err_not_ase_calc_traj()
 
         # A) Include previous calculations for training the ML model.
@@ -116,11 +117,12 @@ class MLNEB(object):
             is_endpoint_prev_calcs = read(start, '-1:')
             is_endpoint = prev_calculations + is_endpoint_prev_calcs
             fs_endpoint = read(end, '-1:')
-
-        # B) Only include initial and final (optimized) images.
-        if prev_calculations is None:
+        elif start is not None:
             is_endpoint = read(start, '-1:')
             fs_endpoint = read(end, '-1:')
+        else:
+            is_endpoint = [path[0]]
+            fs_endpoint = [path[-1]]
         is_pos = is_endpoint[-1].get_positions().flatten()
         fs_pos = fs_endpoint[-1].get_positions().flatten()
 
@@ -204,6 +206,8 @@ class MLNEB(object):
                                         scaling_targets=self.max_targets,
                                         iteration=self.iter,
                                         )
+            for i in self.images[1:-1]:
+                print(i.calc)
 
             neb_interpolation = NEB(self.images, k=self.spring)
 
@@ -211,28 +215,28 @@ class MLNEB(object):
 
             self.initial_images = copy.deepcopy(self.images)
 
-        # B) If the user sets a path:
-        if path is not None:
-            images_path = read(path, ':')
-
-            if not np.array_equal(images_path[0].get_positions().flatten(),
-                                  is_pos):
-                images_path.insert(0, self.initial_endpoint)
-            if not np.array_equal(images_path[-1].get_positions().flatten(),
-                                  fs_pos):
-                images_path.append(self.final_endpoint)
+        else:
+            images_path = path
 
             self.n_images = len(images_path)
-            self.images = create_ml_neb(is_endpoint=self.initial_endpoint,
-                                        fs_endpoint=self.final_endpoint,
-                                        images_interpolation=images_path,
-                                        n_images=self.n_images,
-                                        constraints=self.constraints,
-                                        index_constraints=self.index_mask,
-                                        scaling_targets=self.max_targets,
-                                        iteration=self.iter,
-                                        )
             self.d_start_end = np.abs(distance.euclidean(is_pos, fs_pos))
+
+            for i, image in enumerate(images_path):
+                image.info.update({'label': i,
+                                   'uncertainty': 0,
+                                   'iteration': self.iter})
+
+                if i in [0, self.n_images - 1]:
+                    continue
+
+                image.set_calculator(
+                    ASECalc(
+                        gp=None,
+                        index_constraints=self.index_mask,
+                        scaling_targets=self.max_targets)
+                )
+            self.images = images_path
+            self.initial_images = copy.deepcopy(self.images)
 
         # Save files with all the paths that have been predicted:
         write('all_predicted_paths.traj', self.images)
