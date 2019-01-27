@@ -18,6 +18,7 @@ from ase.calculators.calculator import Calculator, all_changes
 from ase.atoms import Atoms
 from catlearn import __version__
 
+
 class MLNEB(object):
 
     def __init__(self, start=None, end=None, prev_calculations=None,
@@ -259,7 +260,7 @@ class MLNEB(object):
 
         print_info_neb(self)
 
-    def run(self, fmax=0.05, unc_convergence=0.050, steps=200,
+    def run(self, fmax=0.05, unc_convergence=0.050, steps=200, gp_steps=5000,
             trajectory='ML_NEB_catlearn.traj', acquisition='acq_2', dt=0.025):
 
         """Executing run will start the optimization process.
@@ -271,6 +272,8 @@ class MLNEB(object):
         unc_convergence: float
             Maximum uncertainty for convergence (in eV).
         steps : int
+            Maximum number of DFT evaluations.
+        gp_steps : int
             Maximum number of iterations in the surrogate model.
         trajectory: string
             Filename to store the output.
@@ -285,6 +288,7 @@ class MLNEB(object):
         Files :
         """
         self.acq = acquisition
+        self.ml_steps = gp_steps
 
         # Calculate a third point if only known initial & final structures.
         if len(self.list_targets) == 2:
@@ -296,7 +300,7 @@ class MLNEB(object):
             eval_and_append(self, self.interesting_point)
             self.iter += 1
             self.max_forces = get_fmax(-np.array([self.list_gradients[-1]]),
-                                   self.num_atoms)
+                                       self.num_atoms)
             self.max_abs_forces = np.max(np.abs(self.max_forces))
             self.list_max_abs_forces.append(self.max_abs_forces)
             print_info_neb(self)
@@ -308,12 +312,7 @@ class MLNEB(object):
             train_gp_model(self)
 
             # 2. Setup and run ML NEB:
-
-            ml_steps = self.n_images * len(self.index_mask)
-            ml_steps = 250 if ml_steps <= 250 else ml_steps  # Min steps.
-            ml_steps = 750 if ml_steps >= 750 else ml_steps  # Min steps.
-
-            print('Max number steps:', ml_steps)
+            print('Max number steps:', gp_steps)
             ml_cycles = 0
 
             while True:
@@ -346,10 +345,10 @@ class MLNEB(object):
 
                 print('Optimizing ML CI-NEB using dt:', dt)
                 neb_opt = MDMin(ml_neb, dt=dt)
-                neb_opt.run(fmax=(fmax * 0.9), steps=ml_steps)
+                neb_opt.run(fmax=(fmax * 0.9), steps=gp_steps)
                 n_steps_performed = neb_opt.__dict__['nsteps']
 
-                if n_steps_performed <= ml_steps-1:
+                if n_steps_performed <= gp_steps-1:
                     print('Converged optimization in the predicted landscape.')
                     break
 
@@ -357,6 +356,9 @@ class MLNEB(object):
                 print('ML cycles performed:', ml_cycles)
 
                 if ml_cycles == 2:
+                    # If convergence fails on the first MLNEB iteration, this
+                    # will not have a file to read from correctly.
+                    # Also, running this twice without perturbation is a waste
                     self.images = read('./last_predicted_path.traj', ':')
                     print('ML process not optimized...not safe...')
                     break
@@ -441,7 +443,7 @@ class MLNEB(object):
                     # Select image with max. uncertainty.
                     self.argmax_unc = np.argmax(self.uncertainty_path[1:-1])
                     self.interesting_point = self.images[1:-1][
-                    ml_cycles           .argmax_unc].get_positions().flatten()
+                        ml_cycles.argmax_unc].get_positions().flatten()
 
                     # Select image with max. predicted value.
                     if np.max(self.uncertainty_path[1:-1]) < unc_convergence:
