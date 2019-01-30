@@ -260,7 +260,7 @@ class MLNEB(object):
 
         print_info_neb(self)
 
-    def run(self, fmax=0.05, unc_convergence=0.050, steps=200, gp_steps=5000,
+    def run(self, fmax=0.05, unc_convergence=0.050, steps=200, gp_steps=20000,
             trajectory='ML_NEB_catlearn.traj', acquisition='acq_2', dt=0.025):
 
         """Executing run will start the optimization process.
